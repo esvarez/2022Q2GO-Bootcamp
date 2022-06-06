@@ -85,7 +85,7 @@ func (c Client) AddPokemon(pokemon *pokemon.Pokemon) error {
 		}
 	*/
 	// records = append(records, []string{strconv.Itoa(pokemon.ID), pokemon.Name})
-
+	// TODO avoid duplicates
 	if err := writer.Write([]string{strconv.Itoa(pokemon.ID), pokemon.Name}); err != nil {
 		return err
 	}

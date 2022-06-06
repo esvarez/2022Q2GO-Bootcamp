@@ -8,6 +8,7 @@ import (
 var (
 	InternalServerError   = AppError{StatusCode: http.StatusInternalServerError, Type: "internal_server_error", Message: "Internal server error"}
 	ResourceNotFoundError = AppError{StatusCode: http.StatusNotFound, Type: "resource_not_found", Message: "Resource not found"}
+	BadRequestError       = AppError{StatusCode: http.StatusBadRequest, Type: "bad_request", Message: "Bad request"}
 )
 
 type AppError struct {
