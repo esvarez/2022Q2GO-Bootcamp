@@ -21,8 +21,13 @@ type writer interface {
 	AddPokemon(pokemon *Pokemon) error
 }
 
+type reader interface {
+	GetAllPokemon() ([]Pokemon, error)
+}
+
 type repository interface {
 	writer
+	reader
 }
 
 type Service struct {
@@ -32,22 +37,22 @@ type Service struct {
 	repo   repository
 }
 
-type workFunc func(ctx context.Context, pokemon []string) ([]string, error)
+type workFunc func(ctx context.Context, pokemon Pokemon) (Pokemon, error)
 
 type workerPool struct {
-	queue  chan Work
-	result chan Result
-	done   chan any
-}
-
-type Work struct {
-	fn        workFunc
-	pokemon   []string
+	queue     chan Work
+	result    chan Result
+	done      chan any
 	condition int
 }
 
+type Work struct {
+	fn      workFunc
+	pokemon Pokemon
+}
+
 type Result struct {
-	Value []string
+	Value Pokemon
 	err   error
 }
 
@@ -59,7 +64,7 @@ func (w Work) execute(ctx context.Context) Result {
 	return Result{Value: val}
 }
 
-func worker(ctx context.Context, id int, wg *sync.WaitGroup, works <-chan Work, result chan<- Result) {
+func worker(ctx context.Context, id, limit, condition int, wg *sync.WaitGroup, works <-chan Work, result chan<- Result) {
 	defer wg.Done()
 	fmt.Println("worker", id, "started")
 	count := 0
@@ -69,18 +74,16 @@ func worker(ctx context.Context, id int, wg *sync.WaitGroup, works <-chan Work, 
 			if !ok {
 				return
 			}
-			//result <- work.execute(ctx)
-			// TODO handle error
-			//i, _ := strconv.Atoi(work.pokemon[0])
-			count++
-			//if i%2 == work.condition {
-			result <- Result{Value: work.pokemon, err: nil}
 
-			//}
+			// TODO handle error
+			if work.pokemon.ID%2 == condition {
+				count++
+				result <- Result{Value: work.pokemon, err: nil}
+			}
 			fmt.Println("worker", id, "started", "processed", count)
-			//if count == 10 {
-			//	return
-			//}
+			if count == limit {
+				return
+			}
 		case <-ctx.Done():
 			fmt.Println("workers done")
 			result <- Result{err: ctx.Err()}
@@ -89,21 +92,26 @@ func worker(ctx context.Context, id int, wg *sync.WaitGroup, works <-chan Work, 
 	}
 }
 
-func NewWorkerPool() workerPool {
+func NewWorkerPool(tpe string) workerPool {
 	// TODO move worker pool to other package
+	var condition int
+	if tpe == "odd" {
+		condition = 1
+	}
 	return workerPool{
-		queue:  make(chan Work),
-		result: make(chan Result),
-		done:   make(chan any),
+		queue:     make(chan Work),
+		result:    make(chan Result),
+		done:      make(chan any),
+		condition: condition,
 	}
 }
 
-func (w workerPool) Run(ctx context.Context) {
+func (w workerPool) Run(ctx context.Context, limit int) {
 	var wg sync.WaitGroup
 
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
-		go worker(ctx, i, &wg, w.queue, w.result)
+		go worker(ctx, i, limit, w.condition, &wg, w.queue, w.result)
 	}
 	wg.Wait()
 	w.Close()
@@ -111,10 +119,10 @@ func (w workerPool) Run(ctx context.Context) {
 
 func NewService(repo repository) *Service {
 	return &Service{
-		endpoint:   endpoint,
-		repo:       repo,
-		client:     http.Client{},
-		workerPool: NewWorkerPool(),
+		endpoint: endpoint,
+		repo:     repo,
+		client:   http.Client{},
+		//workerPool: NewWorkerPool(),
 	}
 }
 
@@ -129,30 +137,6 @@ func (w workerPool) AddWork(works []Work) {
 	}
 	close(w.queue)
 }
-
-/*
-func (w workerPool) AddWorkers(workers int) {
-	w.wg.Add(workers)
-
-	for i := 0; i < workers; i++ {
-		go func(workerId int) {
-			count := 0
-			for job := range w.queue {
-				// Logic here
-				job.fn.Run()
-				fmt.Printf(" worker %d prcesing", workerId)
-				count++
-				if count == 2 {
-					break
-				}
-
-			}
-			fmt.Printf("worker %d finished %d jobs\n", workerId, count)
-			w.wg.Done()
-		}(i)
-	}
-}
-*/
 
 func (s Service) FindByID(id string) (*Pokemon, error) {
 	resp, err := s.client.Get(s.endpoint + pokemonInfo + id)
@@ -175,7 +159,48 @@ func (s Service) FindByID(id string) (*Pokemon, error) {
 	return pokemon, nil
 }
 
-func (s Service) GetPokemon(tpe string, items, itemsWorker int) (*Pokemon, error) {
-	//TODO implement me
-	panic("implement me")
+func (s Service) GetPokemon(tpe string, items, itemsWorker int) ([]Pokemon, error) {
+	pool := NewWorkerPool(tpe)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var tasks []Work
+
+	/*
+		simpleTask := func(ctx context.Context, pokemon Pokemon) (Pokemon, error) {
+			fmt.Println("Validating ", pokemon)
+			return pokemon, nil
+		}
+	*/
+	pokemons, err := s.repo.GetAllPokemon()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, pokemon := range pokemons {
+		tasks = append(tasks, Work{
+			//fn:      simpleTask,
+			pokemon: pokemon,
+		})
+	}
+	go pool.AddWork(tasks)
+
+	go pool.Run(ctx, itemsWorker)
+
+	pkmns := []Pokemon{}
+	for {
+		select {
+		case r, ok := <-pool.result:
+			if !ok {
+				continue
+			}
+
+			pkmns = append(pkmns, r.Value)
+			if len(pkmns) == items {
+				return pkmns, nil
+			}
+		case <-pool.done:
+			return pkmns, nil
+		}
+	}
 }

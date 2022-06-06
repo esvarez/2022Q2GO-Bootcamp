@@ -17,7 +17,7 @@ const (
 	pokemonID      = "pokemon_id"
 	items          = "items"
 	tpe            = "type"
-	itemsPerWorker = "items_per_worker"
+	itemsPerWorker = "items_per_workers"
 )
 
 var (
@@ -30,7 +30,7 @@ type PokemonHandler struct {
 
 type pokemonService interface {
 	FindByID(id string) (*pokemon.Pokemon, error)
-	GetPokemon(tpe string, items, itemsWorker int) (*pokemon.Pokemon, error)
+	GetPokemon(tpe string, items, itemsWorker int) ([]pokemon.Pokemon, error)
 }
 
 func NewPokemonHandler(service pokemonService) *PokemonHandler {

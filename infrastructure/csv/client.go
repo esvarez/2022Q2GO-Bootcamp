@@ -73,6 +73,27 @@ func (c Client) FindBoardGame(id int) (*boardgame.BoardGame, error) {
 	}, nil
 }
 
+func (c Client) GetAllPokemon() ([]pokemon.Pokemon, error) {
+	csvClient := getCSVReader(c.path)
+
+	data, err := csvClient.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+	pokemons := []pokemon.Pokemon{}
+	for _, record := range data[1:] {
+		id, err := strconv.Atoi(record[0])
+		if err != nil {
+			return nil, err
+		}
+		pokemons = append(pokemons, pokemon.Pokemon{
+			ID:   id,
+			Name: record[1],
+		})
+	}
+	return pokemons, nil
+}
+
 func (c Client) AddPokemon(pokemon *pokemon.Pokemon) error {
 	writer := getCSVWriter(c.path)
 	/*
